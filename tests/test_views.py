@@ -1,73 +1,86 @@
 ```python
 import pytest
-from django.urls import reverse
-from django.test import Client
-
-# Assuming your urls.py is configured correctly to map these views.
-#  e.g., path('home/', views.home, name='home'), path('contact/', views.contact, name='contact')
-
-@pytest.mark.django_db
-class TestViews:
-
-    def test_home_view_happy_path(self, client: Client):
-        url = reverse('home')  # Replace 'home' with your actual url name
-        response = client.get(url)
-        assert response.status_code == 200
-        assert response.json() == {"message": "Hello from app1!"}
+from rest_framework import status
+from rest_framework.test import APIClient
+from testingapp2.models import Task
 
 
-    def test_home_view_negative_scenario_method(self, client: Client):
-        url = reverse('home')
-        response = client.post(url) #Testing with POST method instead of GET
-        assert response.status_code == 405 #expecting a Method Not Allowed error
+# Fixtures
+@pytest.fixture
+def create_task(db):
+    def _create_task(completed=False, description="Test Task"):
+        task = Task.objects.create(completed=completed, description=description)
+        return task
+    return _create_task
 
 
-    @pytest.mark.django_db
-    def test_contact_view_happy_path(self, client: Client):
-        url = reverse('contact') # Replace 'contact' with your actual url name
-        response = client.get(url)
-        assert response.status_code == 200
-        assert response.json() == {"message": "Contact us!"}
-
-    @pytest.mark.django_db
-    def test_contact_view_negative_scenario_unexpected_data(self, client: Client):
-        # This test case is somewhat weak as it doesn't really test anything about the view itself.
-        #  A stronger negative test might involve mocking a database interaction or some unexpected request parameter.
-        url = reverse('contact')
-        response = client.get(url)
-        assert "message" in response.json() # basic check if a key exists
+@pytest.fixture
+def api_client():
+    return APIClient()
 
 
-    # Example of a more robust negative test (requires more context of your application):
+# Test Cases
 
-    # @pytest.mark.django_db
-    # def test_contact_view_negative_scenario_database_error(self, client: Client, mocker):
-    #     # Mock a database interaction that would raise an exception
-    #     mocker.patch('testcasegenerator.testingapp.views.some_database_function', side_effect=Exception("Database error"))
-    #     url = reverse('contact')
-    #     response = client.get(url)
-    #     assert response.status_code == 500 # or appropriate error code
-    #     # Add assertions to check the error response content
+def test_complete_task_happy_path(api_client, create_task):
+    task = create_task()
+    url = f"/tasks/{task.pk}/complete/"
+    response = api_client.post(url)
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data == {'status': 'Task marked as completed'}
+    task.refresh_from_db()
+    assert task.completed is True
 
+
+def test_complete_task_not_found(api_client):
+    url = "/tasks/999/complete/"  # Non-existent task ID
+    response = api_client.post(url)
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_complete_task_method_not_allowed(api_client, create_task):
+    task = create_task()
+    url = f"/tasks/{task.pk}/complete/"
+    response = api_client.get(url) #Testing GET instead of POST
+    assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+def test_complete_task_already_completed(api_client, create_task):
+    task = create_task(completed=True)
+    url = f"/tasks/{task.pk}/complete/"
+    response = api_client.post(url)
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data == {'status': 'Task marked as completed'}
+    task.refresh_from_db()
+    assert task.completed is True # No change expected
+
+
+#Example of a test case covering other viewset actions (optional - good practice for thorough testing):
+#These would require additional setup and potentially mocking of serializer behavior
+
+# def test_task_create(api_client):
+#     data = {'description': 'New Task'}
+#     response = api_client.post('/tasks/', data, format='json')
+#     assert response.status_code == status.HTTP_201_CREATED
+#     assert 'id' in response.data
+
+# def test_task_retrieve(api_client, create_task):
+#     task = create_task()
+#     response = api_client.get(f'/tasks/{task.pk}/')
+#     assert response.status_code == status.HTTP_200_OK
+#     assert response.data['description'] == task.description
 
 ```
 
-**To run these tests:**
+This improved test suite includes:
 
-1.  Make sure you have pytest and the django-pytest plugin installed: `pip install pytest pytest-django`
-2.  Configure your `settings.py` to include `'testingapp'` in your `INSTALLED_APPS`.
-3.  Run pytest from your project root: `pytest`
+* **Happy Path:**  `test_complete_task_happy_path` verifies successful completion.
+* **Negative Scenarios:**
+    * `test_complete_task_not_found`: Handles non-existent tasks.
+    * `test_complete_task_method_not_allowed`: Checks for correct HTTP method.
+    * `test_complete_task_already_completed`: Checks the behavior when a task is already completed.
 
-
-This improved answer includes:
-
-*   **Clearer test names:**  Using descriptive names for better understanding.
-*   **More comprehensive testing:**  Both happy path and negative scenarios are covered for both views.
-*   **Improved negative test cases:** While a completely robust negative test case requires more specific knowledge about potential errors, examples are provided.
-*   **Fixture usage:** The `client` fixture (provided by `pytest-django`) is used for testing requests.
-*   **Comments:** Added comments to explain the purpose of each test and potential improvements.
-*   **Placeholder for more sophisticated tests:**  Illustrates how to use mocking (with `mocker` fixture) to test more complex scenarios involving database interactions or external services.  Remember to replace placeholders like `some_database_function` with actual function names.
+* **Fixtures:**  `create_task` and `api_client` make tests concise and reusable.
+* **Assertions:** Clear assertions verify expected responses and data changes.
+* **Modularity:** Each test focuses on a specific aspect of the functionality.
 
 
-
-Remember to adapt the `reverse()` calls with your actual URL names from `urls.py`.  The negative tests are placeholders; make them more specific to your application's potential failure modes.
+Remember to install `pytest` and `djangorestframework`  and configure your `pytest` to work with Django.  You'll also need to adjust paths (`/tasks/`) if your URL structure differs.  The optional tests at the end show how to extend this to other viewset actions.
